@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LAN Drop</title>
+<link rel="manifest" href="/manifest.json" crossorigin="use-credentials">
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<meta name="theme-color" content="#0f1115">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="LAN Drop">
+<style>
+  :root{--bg:#0f1115;--panel:#181b22;--line:#2a2f3a;--txt:#e8eaf0;--mut:#8b93a5;--acc:#4f8cff;--ok:#3ecf8e;--bad:#ff6b6b}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,Segoe UI,Tahoma,sans-serif}
+  .wrap{max-width:860px;margin:0 auto;padding:14px 16px 40px}
+  header{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+  h1{font-size:18px;margin:0}
+  h2{font-size:15px;margin:0 0 10px;color:var(--mut);font-weight:600}
+  .link{background:#0b0d11;border:1px solid var(--line);padding:6px 10px;border-radius:8px;font-family:monospace;direction:ltr;cursor:pointer}
+  .spacer{flex:1}
+  button,.btn,textarea{background:#232834;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:9px 14px;font-size:14px;font-family:inherit}
+  button,.btn{cursor:pointer} button:hover,.btn:hover{border-color:var(--acc)}
+  .primary{background:var(--acc);border-color:var(--acc);color:#fff}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px}
+  #drop{border:2px dashed var(--line);border-radius:12px;padding:26px 14px;text-align:center;color:var(--mut);transition:.15s}
+  #drop.over{border-color:var(--acc);background:#1b2336;color:var(--txt)}
+  #drop .big{font-size:34px}
+  .row{display:flex;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid #1f232c}
+  .row:last-child{border-bottom:0}
+  .row .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .row a{color:var(--txt);text-decoration:none}
+  .row small{color:var(--mut);display:block;font-size:12px}
+  .ic{padding:6px 10px}
+  .bar{height:6px;background:#0b0d11;border-radius:4px;overflow:hidden;margin-top:6px}
+  .bar i{display:block;height:100%;width:0;background:var(--acc)}
+  .done .bar i{background:var(--ok)} .fail .bar i{background:var(--bad)}
+  textarea{width:100%;height:80px;resize:vertical;direction:auto}
+  .txt{white-space:pre-wrap;word-break:break-word;flex:1;min-width:0;background:#0b0d11;border-radius:8px;padding:8px 10px;direction:auto}
+  .empty{color:var(--mut);padding:8px 0}
+  .hint{color:var(--mut);font-size:13px}
+  details summary{cursor:pointer;color:var(--mut)}
+  #qr{background:#fff;padding:10px;border-radius:8px;display:inline-block;margin-top:10px;line-height:0}
+  #toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#232834;border:1px solid var(--line);padding:9px 16px;border-radius:20px;opacity:0;transition:.2s;pointer-events:none}
+  #toast.on{opacity:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>📂 LAN Drop</h1>
+    <span class="spacer"></span>
+    <button class="primary" id="installBtn" hidden>📲 تثبيت كتطبيق</button>
+    <span class="link" id="link" title="اضغط للنسخ">...</span>
+  </header>
+
+  <div class="card">
+    <details>
+      <summary>📱 عايز تفتحه من التليفون؟ اعرض QR</summary>
+      <div id="qr"></div>
+    </details>
+    <details style="margin-top:10px">
+      <summary>📲 إزاي أثبّته كتطبيق على التليفون؟</summary>
+      <div class="hint" style="margin-top:8px;line-height:1.9">
+        <b>أندرويد (كروم):</b> قايمة ⋮ ← "Install app" أو "Add to Home screen".<br>
+        <b>آيفون (سفاري):</b> زر المشاركة ← "Add to Home Screen".<br>
+        على الشبكة المحلية (http) بيتضاف كاختصار بأيقونة. التثبيت الكامل كتطبيق مستقل بيحتاج HTTPS، يعني لو فتحته من لينك نفق Cloudflare.
+      </div>
+    </details>
+  </div>
+
+  <div class="card">
+    <h2>رفع ملفات</h2>
+    <div id="drop">
+      <div class="big">⬆️</div>
+      <div>اسحب الملفات هنا أو</div><br>
+      <label class="btn primary">اختار ملفات<input type="file" id="file" multiple hidden></label>
+    </div>
+    <div id="queue"></div>
+  </div>
+
+  <div class="card">
+    <h2>الملفات المشتركة <span id="count"></span></h2>
+    <div id="files"><div class="empty">مفيش ملفات لسه</div></div>
+  </div>
+
+  <div class="card">
+    <h2>نصوص ولينكات</h2>
+    <textarea id="txt" placeholder="اكتب أو الصق نص أو لينك عشان يوصل للجهاز التاني..."></textarea>
+    <div style="margin-top:8px"><button class="primary" id="sendTxt">مشاركة النص</button></div>
+    <div id="texts" style="margin-top:10px"></div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function toast(m){ const t=$('#toast'); t.textContent=m; t.classList.add('on'); clearTimeout(toast.t); toast.t=setTimeout(()=>t.classList.remove('on'),1800); }
+function fmt(n){ const u=['B','KB','MB','GB','TB']; let i=0; while(n>=1024&&i<4){n/=1024;i++} return (i?n.toFixed(1):n)+' '+u[i]; }
+function ago(t){ const d=Math.floor(Date.now()/1000)-t; if(d<60) return 'دلوقتي'; if(d<3600) return Math.floor(d/60)+' د'; if(d<86400) return Math.floor(d/3600)+' س'; return new Date(t*1000).toLocaleDateString(); }
+function copy(text){
+  if(navigator.clipboard && window.isSecureContext){ return navigator.clipboard.writeText(text).then(()=>toast('اتنسخ ✓')); }
+  const a=document.createElement('textarea'); a.value=text; a.style.position='fixed'; a.style.opacity='0'; document.body.appendChild(a); a.select();
+  try{ document.execCommand('copy'); toast('اتنسخ ✓'); }catch(e){ toast('انسخه يدويًا'); } a.remove();
+}
+
+/* ---------- رفع ---------- */
+const queue = [];
+let busy = false;
+function addFiles(list){
+  for(const f of list){
+    const el = document.createElement('div'); el.className='row';
+    el.innerHTML = '<div class="nm"><span></span><small></small><div class="bar"><i></i></div></div>';
+    el.querySelector('span').textContent = f.name;
+    el.querySelector('small').textContent = fmt(f.size) + ' — في الانتظار';
+    $('#queue').prepend(el);
+    queue.push({f, el});
+  }
+  next();
+}
+function next(){
+  if(busy) return; const job = queue.shift(); if(!job) return;
+  busy = true;
+  const {f, el} = job, small = el.querySelector('small'), bar = el.querySelector('.bar i');
+  const x = new XMLHttpRequest();
+  x.open('POST', '/api/upload?name=' + encodeURIComponent(f.name));
+  const t0 = Date.now();
+  x.upload.onprogress = e => {
+    if(!e.lengthComputable) return;
+    bar.style.width = (e.loaded/e.total*100) + '%';
+    const sp = e.loaded / Math.max(1,(Date.now()-t0)/1000);
+    small.textContent = fmt(e.loaded)+' / '+fmt(e.total)+' — '+fmt(sp)+'/ث';
+  };
+  const end = ok => {
+    el.classList.add(ok?'done':'fail');
+    small.textContent = ok ? '✓ تم رفع ' + fmt(f.size) : '⚠ فشل الرفع';
+    if(ok) bar.style.width='100%';
+    busy = false; refresh(); next();
+    if(ok) setTimeout(()=>el.remove(), 6000);
+  };
+  x.onload = () => end(x.status===200);
+  x.onerror = () => end(false);
+  x.send(f);
+}
+$('#file').onchange = e => { addFiles(e.target.files); e.target.value=''; };
+const drop = $('#drop');
+['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', e => addFiles(e.dataTransfer.files));
+window.addEventListener('paste', e => { const fs=[...(e.clipboardData?.files||[])]; if(fs.length) addFiles(fs); });
+
+/* ---------- قايمة الملفات ---------- */
+let lastFiles = '', lastTexts = '';
+async function refresh(){
+  try{
+    const fs = await (await fetch('/api/files')).json();
+    const sig = JSON.stringify(fs);
+    if(sig !== lastFiles){
+      lastFiles = sig;
+      $('#count').textContent = fs.length ? '(' + fs.length + ')' : '';
+      $('#files').innerHTML = fs.length ? fs.map(f => `
+        <div class="row">
+          <div class="nm"><a href="/files/${encodeURIComponent(f.name)}" target="_blank">${esc(f.name)}</a>
+            <small>${fmt(f.size)} · ${ago(f.mtime)}</small></div>
+          <a class="btn ic" href="/files/${encodeURIComponent(f.name)}?dl=1" title="تحميل">⬇</a>
+          <button class="ic" data-del="${esc(f.name)}" title="حذف">🗑</button>
+        </div>`).join('') : '<div class="empty">مفيش ملفات لسه</div>';
+    }
+    const ts = await (await fetch('/api/texts')).json();
+    const sig2 = JSON.stringify(ts);
+    if(sig2 !== lastTexts){
+      lastTexts = sig2;
+      $('#texts').innerHTML = ts.map(t => `
+        <div class="row">
+          <div class="txt">${esc(t.text)}</div>
+          <button class="ic" data-copy="${t.id}" title="نسخ">📋</button>
+          <button class="ic" data-tdel="${t.id}" title="حذف">🗑</button>
+        </div>`).join('');
+      window._texts = ts;
+    }
+  }catch(e){}
+}
+$('#files').addEventListener('click', async e => {
+  const b = e.target.closest('[data-del]'); if(!b) return;
+  if(!confirm('حذف "' + b.dataset.del + '" ؟')) return;
+  await fetch('/api/delete?name=' + encodeURIComponent(b.dataset.del), {method:'POST'}); refresh();
+});
+$('#texts').addEventListener('click', async e => {
+  const c = e.target.closest('[data-copy]'), d = e.target.closest('[data-tdel]');
+  if(c){ const t=(window._texts||[]).find(x=>String(x.id)===c.dataset.copy); if(t) copy(t.text); }
+  if(d){ await fetch('/api/text/delete?id=' + d.dataset.tdel, {method:'POST'}); refresh(); }
+});
+$('#sendTxt').onclick = async () => {
+  const v = $('#txt').value.trim(); if(!v) return;
+  await fetch('/api/text', {method:'POST', body: JSON.stringify({text:v})});
+  $('#txt').value=''; toast('اتشارك ✓'); refresh();
+};
+
+/* ---------- لينك و QR ---------- */
+(async()=>{
+  try{
+    const i = await (await fetch('/api/info')).json();
+    $('#link').textContent = i.link;
+    $('#link').onclick = () => copy(i.link);
+    if(window.qrcode){ const q = qrcode(0,'M'); q.addData(i.link); q.make(); $('#qr').innerHTML = q.createSvgTag(5,0); }
+    else $('#qr').textContent = 'QR محتاج نت عشان يتحمّل.';
+  }catch(e){}
+})();
+let deferred = null;
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferred = e; $('#installBtn').hidden = false; });
+$('#installBtn').onclick = async () => { if(!deferred) return; deferred.prompt(); await deferred.userChoice; deferred = null; $('#installBtn').hidden = true; };
+if('serviceWorker' in navigator){ navigator.serviceWorker.register('/sw.js').catch(()=>{}); }
+refresh(); setInterval(refresh, 3000);
+</script>
+</body>
+</html>
