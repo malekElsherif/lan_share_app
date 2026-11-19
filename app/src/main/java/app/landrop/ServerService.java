@@ -79,15 +79,17 @@ public class ServerService extends Service {
             if (root == null) root = getFilesDir();
             root = new File(root, "LanDrop");
             server = new LanServer(root, PORT, readAsset("index.html"));
+            server.setHostIdentity(Identity.id(this), Identity.name(this));
             server.setEvents(new LanServer.Events() {
                 @Override
-                public void onFile(String name, String from) {
-                    Notifier.post(ServerService.this, "📥 ملف جديد من " + from, name);
+                public void onFile(String name, String from, String to) {
+                    if (!MainActivity.foreground) Notifier.post(ServerService.this, "📥 ملف جديد من " + from, name);
                 }
 
                 @Override
-                public void onText(String text, String from) {
-                    Notifier.post(ServerService.this, "💬 رسالة من " + from, text.length() > 120 ? text.substring(0, 120) : text);
+                public void onText(String text, String from, String to) {
+                    if (!MainActivity.foreground)
+                        Notifier.post(ServerService.this, "💬 رسالة من " + from, text.length() > 120 ? text.substring(0, 120) : text);
                 }
             });
             server.start();

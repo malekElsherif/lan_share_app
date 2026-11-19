@@ -12,21 +12,18 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
-import android.view.Gravity;
-import android.view.ViewGroup;
+import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import android.widget.LinearLayout;
-import android.widget.TextView;
 import android.widget.Toast;
 
-import java.io.File;
-import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -34,47 +31,66 @@ import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.URL;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 
+/** واجهة التطبيق: WebView بيعرض app.html (تصميم مخصص للتطبيق) فوق API السيرفر. */
 public class MainActivity extends Activity {
     private static final int REQ_FILE = 11;
+    static volatile boolean foreground = false;
 
     private WebView web;
-    private TextView bar;
     private ValueCallback<Uri[]> chooser;
     private final Handler ui = new Handler(Looper.getMainLooper());
+    private volatile String mode = "";
     private String target = "";
     private int retries = 0;
+
+    /** بيتنادى من app.html. */
+    private class Bridge {
+        @JavascriptInterface
+        public String id() { return Identity.id(MainActivity.this); }
+
+        @JavascriptInterface
+        public String name() { return Identity.name(MainActivity.this); }
+
+        @JavascriptInterface
+        public void setName(String n) { Identity.setName(MainActivity.this, n); }
+
+        @JavascriptInterface
+        public String mode() { return mode; }
+
+        @JavascriptInterface
+        public void reconnect() { runOnUiThread(MainActivity.this::connect); }
+    }
 
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
-        if (Build.VERSION.SDK_INT >= 33) {
-            requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 1);
-        }
-
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-
-        bar = new TextView(this);
-        int p = (int) (10 * getResources().getDisplayMetrics().density);
-        bar.setPadding(p, p, p, p);
-        bar.setTextColor(Color.WHITE);
-        bar.setBackgroundColor(0xFF2F7BFF);
-        bar.setTextSize(13);
-        bar.setGravity(Gravity.CENTER);
-        bar.setOnClickListener(v -> connect());
-
         web = new WebView(this);
+        web.setBackgroundColor(Color.parseColor("#0D1015"));
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
-        s.setMediaPlaybackRequiresUserGesture(false);
+        web.addJavascriptInterface(new Bridge(), "LanDropApp");
         web.setWebViewClient(new WebViewClient() {
             @Override
-            public void onReceivedError(WebView v, WebResourceRequest r, WebResourceError e) {
-                if (r.isForMainFrame() && retries++ < 6) {
-                    ui.postDelayed(() -> v.loadUrl(target), 800);
+            public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest r) {
+                if ("/__app".equals(r.getUrl().getPath())) {
+                    try {
+                        WebResourceResponse res = new WebResourceResponse("text/html", "UTF-8", getAssets().open("app.html"));
+                        Map<String, String> h = new HashMap<>();
+                        h.put("Cache-Control", "no-store");
+                        res.setResponseHeaders(h);
+                        return res;
+                    } catch (IOException ignored) { }
                 }
+                return null;
+            }
+
+            @Override
+            public void onReceivedError(WebView v, WebResourceRequest r, WebResourceError e) {
+                if (r.isForMainFrame() && retries++ < 6) ui.postDelayed(() -> v.loadUrl(target), 800);
             }
         });
         web.setWebChromeClient(new WebChromeClient() {
@@ -92,36 +108,29 @@ public class MainActivity extends Activity {
             }
         });
         web.setDownloadListener((url, ua, cd, mime, len) -> download(url, mime));
-
-        root.addView(bar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        root.addView(web, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
-        setContentView(root);
+        setContentView(web);
         connect();
     }
 
     /** أول جهاز يفتح بيبقى السيرفر، والباقي بيتصل بيه. */
     private void connect() {
-        bar.setText("بدوّر على LAN Drop على الشبكة...");
         new Thread(() -> {
             final String[] found = Discovery.find(1500);
             runOnUiThread(() -> {
                 if (found != null && !isOwnAddress(found[0])) {
-                    load("http://" + found[0] + ":" + found[1]);
-                    bar.setText("متصل بسيرفر على " + found[0] + " — اضغط هنا لإعادة البحث");
+                    String base = "http://" + found[0] + ":" + found[1];
+                    mode = "client:" + found[0];
+                    stopService(new Intent(this, ServerService.class));
+                    startForegroundService(new Intent(this, WatchService.class).putExtra(WatchService.EXTRA_URL, base));
+                    load(base + "/__app");
                 } else {
-                    becomeServer();
+                    mode = "server";
+                    stopService(new Intent(this, WatchService.class));
+                    if (!ServerService.running) startForegroundService(new Intent(this, ServerService.class));
+                    ui.postDelayed(() -> load("http://127.0.0.1:" + ServerService.PORT + "/__app"), 700);
                 }
             });
         }).start();
-    }
-
-    private void becomeServer() {
-        if (!ServerService.running) {
-            startForegroundService(new Intent(this, ServerService.class));
-        }
-        bar.setText("التليفون هو السيرفر: http://" + LanServer.lanIp() + ":" + ServerService.PORT
-                + "\nافتح الرابط ده من أي جهاز على نفس الشبكة");
-        ui.postDelayed(() -> load("http://127.0.0.1:" + ServerService.PORT), 700);
     }
 
     private void load(String url) {
@@ -140,9 +149,10 @@ public class MainActivity extends Activity {
         return false;
     }
 
-    // ---------- تحميل الملفات على Downloads ----------
+    // ---------- تحميل الملفات على Downloads/LanDrop ----------
     private void download(final String url, final String mime) {
-        final String name = Uri.parse(url).getLastPathSegment() == null ? "file" : Uri.parse(url).getLastPathSegment();
+        final String seg = Uri.parse(url).getLastPathSegment();
+        final String name = seg == null ? "file" : seg;
         if (Build.VERSION.SDK_INT < 29) {
             try {
                 DownloadManager.Request r = new DownloadManager.Request(Uri.parse(url));
@@ -165,7 +175,7 @@ public class MainActivity extends Activity {
                 InputStream in = c.getInputStream();
                 ContentValues v = new ContentValues();
                 v.put(MediaStore.Downloads.DISPLAY_NAME, name);
-                v.put(MediaStore.Downloads.MIME_TYPE, mime == null || mime.isEmpty() ? "application/octet-stream" : mime);
+                v.put(MediaStore.Downloads.MIME_TYPE, Saver.mimeOf(name));
                 v.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/LanDrop");
                 v.put(MediaStore.Downloads.IS_PENDING, 1);
                 item = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, v);
@@ -202,8 +212,19 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        foreground = true;
+    }
+
+    @Override
+    protected void onPause() {
+        foreground = false;
+        super.onPause();
+    }
+
+    @Override
     public void onBackPressed() {
-        if (web.canGoBack()) web.goBack();
-        else finish();
+        finish();
     }
 }

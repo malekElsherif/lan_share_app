@@ -45,6 +45,7 @@
   #qr{background:#fff;padding:10px;border-radius:8px;display:inline-block;margin-top:10px;line-height:0}
   #toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#232834;border:1px solid var(--line);padding:9px 16px;border-radius:20px;opacity:0;transition:.2s;pointer-events:none}
   #toast.on{opacity:1}
+  .chip{padding:7px 14px;border-radius:20px;cursor:pointer;background:#232834;border:1px solid var(--line)} .chip.on{background:var(--acc);border-color:var(--acc);color:#fff}
   .tag{color:var(--acc)} .host{color:#f5c542}
   #nameBox{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50}
   #nameBox[hidden]{display:none}
@@ -76,6 +77,12 @@
         على الشبكة المحلية (http) بيتضاف كاختصار بأيقونة. التثبيت الكامل كتطبيق مستقل بيحتاج HTTPS، يعني لو فتحته من لينك نفق Cloudflare.
       </div>
     </details>
+  </div>
+
+  <div class="card">
+    <h2>ابعت لمين؟</h2>
+    <div id="toRow" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+    <div class="hint" id="toHint" style="margin-top:6px"></div>
   </div>
 
   <div class="card">
@@ -129,6 +136,16 @@ function guessName(){
 }
 let NAME = store.get('ld_name') || guessName();
 function hdrs(extra){ return Object.assign({'X-Device-Id': DID, 'X-Device-Name': encodeURIComponent(NAME)}, extra || {}); }
+let TO = '', TONAME = '', devices = [];
+function toHeaders(){ return TO ? {'X-To': TO, 'X-To-Name': encodeURIComponent(TONAME)} : {}; }
+function renderTo(){
+  const others = devices.filter(d => !d.me);
+  if(TO && !others.some(d => d.id === TO)){ TO = ''; TONAME = ''; }
+  $('#toRow').innerHTML = '<span class="chip ' + (TO ? '' : 'on') + '" data-to="">👥 الكل</span>' +
+    others.map(d => '<span class="chip ' + (TO === d.id ? 'on' : '') + '" data-to="' + esc(d.id) + '" data-name="' + esc(d.name) + '">' + (d.host ? '👑 ' : '📱 ') + esc(d.name) + '</span>').join('');
+  $('#toHint').textContent = TO ? '🔒 اللي هتبعته هيظهر لـ ' + TONAME + ' بس (وصاحب السيرفر).' : (others.length ? 'هيظهر لكل الأجهزة المتصلة.' : 'مفيش أجهزة تانية متصلة دلوقتي.');
+}
+$('#toRow').addEventListener('click', e => { const c = e.target.closest('.chip'); if(!c) return; TO = c.dataset.to || ''; TONAME = c.dataset.name || ''; renderTo(); });
 function showName(){ $('#who').textContent = '👤 ' + NAME + ' ✎'; }
 showName();
 $('#who').onclick = () => { $('#nameIn').value = NAME; $('#nameBox').hidden = false; $('#nameIn').focus(); };
@@ -155,7 +172,7 @@ function checkNew(items, kind){
     const key = kind + ':' + (kind === 'f' ? it.name + '|' + it.mtime : it.id);
     if(seen.has(key)) continue;
     seen.add(key);
-    if(primed && !it.mine) notifyNew(kind === 'f' ? '📥 ملف جديد من ' + it.from : '💬 رسالة من ' + it.from, kind === 'f' ? it.name : it.text.slice(0,60));
+    if(primed && !it.mine && (!it.to || it.forMe)) notifyNew(kind === 'f' ? '📥 ملف جديد من ' + it.from : '💬 رسالة من ' + it.from, kind === 'f' ? it.name : it.text.slice(0,60));
   }
 }
 
@@ -180,6 +197,7 @@ function next(){
   const x = new XMLHttpRequest();
   x.open('POST', '/api/upload?name=' + encodeURIComponent(f.name));
   x.setRequestHeader('X-Device-Id', DID); x.setRequestHeader('X-Device-Name', encodeURIComponent(NAME));
+  for(const [k,v] of Object.entries(toHeaders())) x.setRequestHeader(k, v);
   const t0 = Date.now();
   x.upload.onprogress = e => {
     if(!e.lengthComputable) return;
@@ -217,21 +235,22 @@ async function refresh(){
       $('#count').textContent = fs.length ? '(' + fs.length + ')' : '';
       $('#files').innerHTML = fs.length ? fs.map(f => `
         <div class="row">
-          <div class="nm"><a href="/files/${encodeURIComponent(f.name)}" target="_blank">${esc(f.name)}</a>
-            <small>${fmt(f.size)} · ${ago(f.mtime)} · <span class="${f.fromHost?'host':'tag'}">${f.fromHost?'👑 ':''}${esc(f.from||'مجهول')}${f.mine?' (إنت)':''}</span></small></div>
-          <a class="btn ic" href="/files/${encodeURIComponent(f.name)}?dl=1" title="تحميل">⬇</a>
+          <div class="nm"><a href="/files/${encodeURIComponent(f.name)}?did=${DID}" target="_blank">${esc(f.name)}</a>
+            <small>${fmt(f.size)} · ${ago(f.mtime)} · <span class="${f.fromHost?'host':'tag'}">${f.fromHost?'👑 ':''}${esc(f.from||'مجهول')}${f.mine?' (إنت)':''}</span>${f.to?' ← 🔒 '+esc(f.forMe?'إنت':(f.toName||'جهاز')):''}</small></div>
+          <a class="btn ic" href="/files/${encodeURIComponent(f.name)}?dl=1&did=${DID}" title="تحميل">⬇</a>
           ${f.canDelete ? `<button class="ic" data-del="${esc(f.name)}" title="حذف">🗑</button>` : ''}
         </div>`).join('') : '<div class="empty">مفيش ملفات لسه</div>';
     }
     const ts = await (await fetch('/api/texts', {headers: hdrs()})).json();
     checkNew(ts, 't'); primed = true;
+    try{ devices = await (await fetch('/api/devices', {headers: hdrs()})).json(); renderTo(); }catch(_){}
     const sig2 = JSON.stringify(ts);
     if(sig2 !== lastTexts){
       lastTexts = sig2;
       $('#texts').innerHTML = ts.map(t => `
         <div class="row">
           <div style="flex:1;min-width:0"><div class="txt">${esc(t.text)}</div>
-            <small><span class="${t.fromHost?'host':'tag'}">${t.fromHost?'👑 ':''}${esc(t.from||'مجهول')}${t.mine?' (إنت)':''}</span> · ${ago(t.time)}</small></div>
+            <small><span class="${t.fromHost?'host':'tag'}">${t.fromHost?'👑 ':''}${esc(t.from||'مجهول')}${t.mine?' (إنت)':''}</span>${t.to?' ← 🔒 '+esc(t.forMe?'إنت':(t.toName||'جهاز')):''} · ${ago(t.time)}</small></div>
           <button class="ic" data-copy="${t.id}" title="نسخ">📋</button>
           ${t.canDelete ? `<button class="ic" data-tdel="${t.id}" title="حذف">🗑</button>` : ''}
         </div>`).join('');
@@ -253,7 +272,7 @@ $('#texts').addEventListener('click', async e => {
 });
 $('#sendTxt').onclick = async () => {
   const v = $('#txt').value.trim(); if(!v) return;
-  await fetch('/api/text', {method:'POST', headers: hdrs(), body: JSON.stringify({text:v})});
+  await fetch('/api/text', {method:'POST', headers: hdrs(), body: JSON.stringify({text:v, to:TO, toName:TONAME})});
   $('#txt').value=''; toast('اتشارك ✓'); refresh();
 };
 

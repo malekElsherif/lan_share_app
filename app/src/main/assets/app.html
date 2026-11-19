@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>LAN Drop</title>
+<style>
+:root{--bg:#0d1015;--s1:#161a21;--s2:#1e232c;--ln:#2a303b;--tx:#eef1f6;--mu:#8d97a7;--ac:#5b9dff;--ok:#3ecf8e;--bad:#ff6b6b;--gold:#f5c542}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--tx);font:15px/1.5 system-ui,Tahoma,sans-serif;display:flex;flex-direction:column;overflow:hidden}
+.top{display:flex;align-items:center;gap:10px;padding:14px 16px 10px;background:var(--s1);border-bottom:1px solid var(--ln)}
+.top h1{font-size:18px;margin:0}
+.st{display:flex;align-items:center;gap:6px;color:var(--mu);font-size:12px;flex:1;min-width:0}
+.st span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--ok)} .dot.off{background:var(--bad)}
+.ib{flex:none;background:var(--s2);border:0;color:var(--tx);width:38px;height:38px;border-radius:50%;font-size:17px}
+.ib.sm{width:34px;height:34px;font-size:15px}
+.lbl{padding:10px 16px 0;color:var(--mu);font-size:12px}
+.chips{display:flex;gap:8px;overflow-x:auto;padding:6px 16px 10px;scrollbar-width:none}
+.chip{flex:none;padding:8px 14px;border-radius:20px;background:var(--s2);border:1px solid var(--ln);color:var(--tx);font-size:14px}
+.chip.on{background:var(--ac);border-color:var(--ac);color:#06142e;font-weight:700}
+.main{flex:1;overflow-y:auto;padding:0 14px 150px}
+.empty{color:var(--mu);text-align:center;padding:40px 10px}
+.it{display:flex;align-items:center;gap:12px;background:var(--s1);border:1px solid var(--ln);border-radius:14px;padding:10px 12px;margin-bottom:8px}
+.ico{flex:none;width:42px;height:42px;border-radius:12px;background:var(--s2);display:flex;align-items:center;justify-content:center;font-size:22px}
+.bd{flex:1;min-width:0}
+.nm{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mt{color:var(--mu);font-size:12px}
+.gold{color:var(--gold)} .tg{color:var(--ac)}
+.bar{height:5px;background:var(--s2);border-radius:3px;margin-top:6px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--ac)}
+.msg{max-width:88%;background:var(--s1);border:1px solid var(--ln);border-radius:16px 16px 16px 4px;padding:10px 12px;margin:0 0 10px}
+.msg.mine{margin-inline-start:auto;background:#1d3558;border-color:#2b4d80;border-radius:16px 16px 4px 16px}
+.msg .tx{white-space:pre-wrap;word-break:break-word;direction:auto}
+.msg .row{display:flex;align-items:center;gap:6px;margin-top:4px}
+.msg .row .mt{flex:1}
+.nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--s1);border-top:1px solid var(--ln);padding-bottom:env(safe-area-inset-bottom)}
+.nav button{flex:1;background:none;border:0;color:var(--mu);padding:8px 0 10px;font-size:12px;position:relative;font-family:inherit}
+.nav button.on{color:var(--ac)} .nav .ic{display:block;font-size:20px}
+.badge{position:absolute;top:4px;left:50%;margin-left:8px;background:var(--bad);color:#fff;border-radius:10px;font-size:10px;padding:0 6px;display:none}
+.fab{position:fixed;bottom:74px;left:18px;width:58px;height:58px;border-radius:18px;border:0;background:var(--ac);color:#06142e;font-size:30px;box-shadow:0 6px 18px rgba(0,0,0,.45)}
+.comp{position:fixed;bottom:62px;left:0;right:0;display:flex;gap:8px;padding:10px 12px;background:var(--bg);border-top:1px solid var(--ln)}
+.comp textarea{flex:1;height:44px;max-height:120px;resize:none;background:var(--s2);color:var(--tx);border:1px solid var(--ln);border-radius:14px;padding:10px 12px;font:inherit;direction:auto}
+.send{flex:none;width:46px;border:0;border-radius:14px;background:var(--ac);color:#06142e;font-size:20px}
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:flex-end;z-index:20}
+.ov.on{display:flex}
+.sheet{width:100%;background:var(--s1);border-radius:20px 20px 0 0;padding:18px 16px 26px;border-top:1px solid var(--ln)}
+.sheet h2{margin:0 0 12px;font-size:16px}
+.sheet label{display:block;color:var(--mu);font-size:12px;margin:12px 0 4px}
+.sheet input{width:100%;background:var(--s2);color:var(--tx);border:1px solid var(--ln);border-radius:12px;padding:11px;font:inherit}
+.sheet .r{display:flex;gap:8px;margin-top:8px}
+.btn{flex:1;border:0;border-radius:12px;padding:11px;font:inherit;background:var(--s2);color:var(--tx)}
+.btn.p{background:var(--ac);color:#06142e;font-weight:700}
+#toast{position:fixed;top:14px;left:50%;transform:translateX(-50%) translateY(-80px);background:#263043;border:1px solid var(--ln);padding:10px 16px;border-radius:14px;transition:.25s;z-index:30;max-width:92%;text-align:center}
+#toast.on{transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+<div class="top">
+  <h1>📡 LAN Drop</h1>
+  <div class="st"><i class="dot" id="dot"></i><span id="stx">بيتصل...</span></div>
+  <button class="ib" id="info">⚙</button>
+</div>
+<div class="lbl">ابعت لـ</div>
+<div class="chips" id="chips"></div>
+
+<div class="main" id="main"></div>
+
+<button class="fab" id="fab">＋</button>
+<input type="file" id="fi" multiple hidden>
+<div class="comp" id="comp" style="display:none">
+  <textarea id="tx" placeholder="اكتب رسالة أو الصق لينك..."></textarea>
+  <button class="send" id="send">➤</button>
+</div>
+<div class="nav">
+  <button id="tf" class="on"><span class="ic">📁</span>الملفات<i class="badge" id="bf"></i></button>
+  <button id="tt"><span class="ic">💬</span>الرسائل<i class="badge" id="bt"></i></button>
+</div>
+
+<div class="ov" id="ov"><div class="sheet">
+  <h2>الإعدادات</h2>
+  <div class="mt" id="mode"></div>
+  <label>اسم جهازك (بيظهر للباقيين)</label>
+  <input id="nm" maxlength="40">
+  <label>رابط السيرفر (شاركه مع الأجهزة التانية)</label>
+  <input id="lk" readonly>
+  <div class="r"><button class="btn" id="cp">نسخ الرابط</button><button class="btn" id="rc">إعادة البحث عن سيرفر</button></div>
+  <div class="r"><button class="btn p" id="sv">حفظ</button></div>
+</div></div>
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s), A = window.LanDropApp;
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function toast(m){ const t=$('#toast'); t.textContent=m; t.classList.add('on'); clearTimeout(toast.t); toast.t=setTimeout(()=>t.classList.remove('on'),2200); }
+const fmt = n => { const u=['B','KB','MB','GB']; let i=0; while(n>=1024&&i<3){n/=1024;i++} return (i?n.toFixed(1):n)+' '+u[i]; };
+const ago = t => { const d=Math.floor(Date.now()/1000)-t; return d<60?'دلوقتي':d<3600?Math.floor(d/60)+' د':d<86400?Math.floor(d/3600)+' س':new Date(t*1000).toLocaleDateString(); };
+const icon = n => { n=n.toLowerCase(); if(/\.(jpe?g|png|gif|webp|heic|bmp)$/.test(n))return'🖼'; if(/\.(mp4|mkv|mov|avi|webm)$/.test(n))return'🎞'; if(/\.(mp3|m4a|wav|ogg|flac)$/.test(n))return'🎵'; if(/\.pdf$/.test(n))return'📕'; if(/\.(zip|rar|7z|tar|gz)$/.test(n))return'🗜'; if(/\.apk$/.test(n))return'🤖'; return'📄'; };
+
+const DID = A ? A.id() : (localStorage.ld_id || (localStorage.ld_id = Math.random().toString(36).slice(2) + Date.now()));
+let NAME = A ? A.name() : (localStorage.ld_name || 'جهاز');
+const hdrs = x => Object.assign({'X-Device-Id': DID, 'X-Device-Name': encodeURIComponent(NAME)}, x || {});
+let TO = '', TONAME = '', devices = [], files = [], texts = [], tab = 'f', seen = new Set(), primed = false, unread = {f:0, t:0}, sig = '';
+
+/* ---------- المستلم ---------- */
+function renderChips(){
+  const others = devices.filter(d => !d.me);
+  if(TO && !others.some(d => d.id === TO)){ TO = ''; TONAME = ''; }
+  $('#chips').innerHTML = '<span class="chip ' + (TO ? '' : 'on') + '" data-to="">👥 الكل</span>' +
+    others.map(d => '<span class="chip ' + (TO === d.id ? 'on' : '') + '" data-to="' + esc(d.id) + '" data-n="' + esc(d.name) + '">' + (d.host ? '👑 ' : '📱 ') + esc(d.name) + '</span>').join('');
+}
+$('#chips').addEventListener('click', e => { const c = e.target.closest('.chip'); if(!c) return; TO = c.dataset.to || ''; TONAME = c.dataset.n || ''; renderChips(); });
+
+/* ---------- عرض ---------- */
+function who(it){ return '<span class="' + (it.fromHost ? 'gold' : 'tg') + '">' + (it.fromHost ? '👑 ' : '') + esc(it.from || 'مجهول') + (it.mine ? ' (إنت)' : '') + '</span>' + (it.to ? ' ← 🔒 ' + esc(it.forMe ? 'إنت' : (it.toName || 'جهاز')) : ''); }
+function render(){
+  $('#main').innerHTML = tab === 'f'
+    ? (files.length ? files.map(f => '<div class="it"><div class="ico">' + icon(f.name) + '</div><div class="bd"><div class="nm">' + esc(f.name) + '</div><div class="mt">' + who(f) + ' · ' + fmt(f.size) + ' · ' + ago(f.mtime) + '</div></div>' +
+        '<button class="ib sm" data-dl="' + esc(f.name) + '">⬇</button>' + (f.canDelete ? '<button class="ib sm" data-del="' + esc(f.name) + '">🗑</button>' : '') + '</div>').join('')
+        : '<div class="empty">مفيش ملفات لسه<br>دوس ＋ عشان تبعت ملف</div>')
+    : (texts.length ? texts.map(t => '<div class="msg ' + (t.mine ? 'mine' : '') + '"><div class="tx">' + esc(t.text) + '</div><div class="row"><div class="mt">' + who(t) + ' · ' + ago(t.time) + '</div>' +
+        '<button class="ib sm" data-cp="' + t.id + '">📋</button>' + (t.canDelete ? '<button class="ib sm" data-td="' + t.id + '">🗑</button>' : '') + '</div></div>').join('')
+        : '<div class="empty">مفيش رسائل لسه</div>');
+}
+function setTab(t){
+  tab = t; unread[t] = 0; badges();
+  $('#tf').classList.toggle('on', t === 'f'); $('#tt').classList.toggle('on', t === 't');
+  $('#fab').style.display = t === 'f' ? '' : 'none'; $('#comp').style.display = t === 't' ? 'flex' : 'none';
+  render();
+}
+function badges(){ for(const k of ['f','t']){ const b = $('#b' + k); b.style.display = unread[k] ? 'block' : 'none'; b.textContent = unread[k]; } }
+$('#tf').onclick = () => setTab('f'); $('#tt').onclick = () => setTab('t');
+
+/* ---------- مزامنة ---------- */
+function checkNew(items, kind){
+  for(const it of items){
+    const key = kind + ':' + (kind === 'f' ? it.name + '|' + it.mtime : it.id);
+    if(seen.has(key)) continue; seen.add(key);
+    if(primed && !it.mine && (!it.to || it.forMe)){
+      toast((kind === 'f' ? '📥 ملف جديد من ' : '💬 رسالة من ') + it.from);
+      if(tab !== kind){ unread[kind]++; badges(); }
+    }
+  }
+}
+async function refresh(){
+  try{
+    files = await (await fetch('/api/files', {headers: hdrs()})).json();
+    texts = await (await fetch('/api/texts', {headers: hdrs()})).json();
+    try{ const dr = await fetch('/api/devices', {headers: hdrs()}); devices = dr.ok ? await dr.json() : []; }catch(_){ devices = []; }
+    checkNew(files, 'f'); checkNew(texts, 't'); primed = true;
+    $('#dot').classList.remove('off');
+    const mode = A ? A.mode() : '';
+    $('#stx').textContent = mode === 'server' ? 'السيرفر على التليفون ده' : mode.startsWith('client:') ? 'متصل بسيرفر ' + mode.slice(7) : 'متصل';
+    const s = JSON.stringify([files, texts, devices, tab]);
+    if(s !== sig){ sig = s; renderChips(); render(); }
+  }catch(e){ $('#dot').classList.add('off'); $('#stx').textContent = 'مفيش اتصال بالسيرفر'; }
+}
+setInterval(refresh, 3000);
+
+/* ---------- رفع ---------- */
+const queue = []; let busy = false;
+$('#fab').onclick = () => $('#fi').click();
+$('#fi').onchange = e => { for(const f of e.target.files) queue.push(f); e.target.value = ''; next(); };
+function next(){
+  if(busy) return; const f = queue.shift(); if(!f) return; busy = true;
+  const card = document.createElement('div'); card.className = 'it';
+  card.innerHTML = '<div class="ico">⬆</div><div class="bd"><div class="nm"></div><div class="mt">بيرفع...</div><div class="bar"><i></i></div></div>';
+  card.querySelector('.nm').textContent = f.name; $('#main').prepend(card);
+  const x = new XMLHttpRequest();
+  x.open('POST', '/api/upload?name=' + encodeURIComponent(f.name));
+  for(const [k,v] of Object.entries(hdrs())) x.setRequestHeader(k, v);
+  if(TO){ x.setRequestHeader('X-To', TO); x.setRequestHeader('X-To-Name', encodeURIComponent(TONAME)); }
+  x.upload.onprogress = e => { if(e.lengthComputable){ card.querySelector('i').style.width = (e.loaded / e.total * 100) + '%'; card.querySelector('.mt').textContent = fmt(e.loaded) + ' / ' + fmt(e.total); } };
+  const end = ok => { busy = false; toast(ok ? '✓ اتبعت ' + f.name + (TO ? ' لـ ' + TONAME : '') : '⚠ فشل رفع ' + f.name); card.remove(); sig = ''; refresh(); next(); };
+  x.onload = () => end(x.status === 200); x.onerror = () => end(false); x.send(f);
+}
+
+/* ---------- رسائل ---------- */
+$('#send').onclick = async () => {
+  const v = $('#tx').value.trim(); if(!v) return;
+  await fetch('/api/text', {method:'POST', headers: hdrs(), body: JSON.stringify({text: v, to: TO, toName: TONAME})});
+  $('#tx').value = ''; sig = ''; refresh();
+};
+
+/* ---------- أزرار القوايم ---------- */
+$('#main').addEventListener('click', async e => {
+  const dl = e.target.closest('[data-dl]'), del = e.target.closest('[data-del]'), cp = e.target.closest('[data-cp]'), td = e.target.closest('[data-td]');
+  if(dl){ const a = document.createElement('a'); a.href = '/files/' + encodeURIComponent(dl.dataset.dl) + '?dl=1&did=' + DID; a.click(); }
+  if(del){ if(!confirm('حذف "' + del.dataset.del + '" ؟')) return; const r = await fetch('/api/delete?name=' + encodeURIComponent(del.dataset.del), {method:'POST', headers: hdrs()}); if(!r.ok) toast('مش مسموحلك تحذف ده'); sig = ''; refresh(); }
+  if(cp){ const t = texts.find(x => String(x.id) === cp.dataset.cp); if(t){ const a = document.createElement('textarea'); a.value = t.text; document.body.appendChild(a); a.select(); try{ document.execCommand('copy'); toast('اتنسخ ✓'); }catch(_){} a.remove(); } }
+  if(td){ const r = await fetch('/api/text/delete?id=' + td.dataset.td, {method:'POST', headers: hdrs()}); if(!r.ok) toast('مش مسموحلك تحذف ده'); sig = ''; refresh(); }
+});
+
+/* ---------- الإعدادات ---------- */
+$('#info').onclick = async () => {
+  $('#nm').value = NAME;
+  const mode = A ? A.mode() : '';
+  $('#mode').textContent = mode === 'server' ? '✅ التليفون ده هو السيرفر' : mode.startsWith('client:') ? '🔗 متصل بسيرفر على ' + mode.slice(7) : '';
+  try{ $('#lk').value = (await (await fetch('/api/info', {headers: hdrs()})).json()).link; }catch(_){}
+  $('#ov').classList.add('on');
+};
+$('#ov').onclick = e => { if(e.target.id === 'ov') $('#ov').classList.remove('on'); };
+$('#sv').onclick = () => { const v = $('#nm').value.trim(); if(v){ NAME = v.slice(0, 40); if(A) A.setName(NAME); else localStorage.ld_name = NAME; toast('اتحفظ الاسم'); } $('#ov').classList.remove('on'); };
+$('#cp').onclick = () => { $('#lk').select(); try{ document.execCommand('copy'); toast('اتنسخ ✓'); }catch(_){} };
+$('#rc').onclick = () => { if(A) A.reconnect(); };
+
+setTab('f'); refresh();
+</script>
+</body>
+</html>

@@ -19,13 +19,36 @@ public class LanServer {
         t.setDaemon(true);
         return t;
     });
-    private final List<String[]> texts = new ArrayList<>(); // {id, text, time, senderId, sender, hostFlag}
-    private final Map<String, String[]> meta = new HashMap<>(); // اسم الملف -> {senderId, sender, hostFlag}
+    private final List<String[]> texts = new ArrayList<>(); // {id, text, time, senderId, sender, hostFlag, to, toName}
+    private final Map<String, String[]> meta = new HashMap<>(); // اسم الملف -> {senderId, sender, hostFlag, to, toName}
+
+    private static final class Dev {
+        String name;
+        boolean host;
+        long last;
+    }
+
+    private final Map<String, Dev> devices = new HashMap<>();
+    private volatile String nativeHostId = "";   // هوية صاحب السيرفر (من التطبيق)
+    private volatile String seenHostId = "", seenHostName = "";
+
+    public void setHostIdentity(String id, String name) {
+        nativeHostId = id == null ? "" : id;
+        if (name != null) seenHostName = name;
+    }
+
+    private boolean forHost(String to) {
+        return to.isEmpty() || to.equals(nativeHostId) || to.equals(seenHostId);
+    }
+
+    private static boolean visible(Who w, String to, String senderId) {
+        return to.isEmpty() || w.host || to.equals(w.id) || (!w.id.isEmpty() && senderId.equals(w.id));
+    }
 
     /** إشعارات لما جهاز تاني يبعت ملف أو رسالة. */
     public interface Events {
-        void onFile(String name, String from);
-        void onText(String text, String from);
+        void onFile(String name, String from, String to);
+        void onText(String text, String from, String to);
     }
 
     private volatile Events events;
@@ -45,20 +68,30 @@ public class LanServer {
         }
     }
 
-    private Who whoOf(Socket s, Map<String, String> h) {
-        String id = h.containsKey("x-device-id") ? h.get("x-device-id") : "";
+    private Who whoOf(Socket s, Map<String, String> h, Map<String, String> qp) {
+        String id = h.containsKey("x-device-id") ? h.get("x-device-id") : qp.containsKey("did") ? qp.get("did") : "";
         if (id.length() > 64) id = id.substring(0, 64);
+        boolean named = h.containsKey("x-device-name");
         String name = "";
         try {
-            name = URLDecoder.decode(h.containsKey("x-device-name") ? h.get("x-device-name").replace("+", "%2B") : "", "UTF-8");
+            name = URLDecoder.decode(named ? h.get("x-device-name").replace("+", "%2B") : "", "UTF-8");
         } catch (Exception ignored) { }
         name = name.replaceAll("[\\x00-\\x1f]", "").trim();
         if (name.length() > 40) name = name.substring(0, 40);
-        if (name.isEmpty()) name = "جهاز مجهول";
         InetAddress a = s.getInetAddress();
         String ip = a.getHostAddress();
         boolean host = ip.equals("127.0.0.1") || ip.equals("0:0:0:0:0:0:0:1") || a.equals(s.getLocalAddress());
-        return new Who(id, name, host);
+        if (!id.isEmpty()) {
+            synchronized (devices) {
+                Dev d = devices.get(id);
+                if (d == null) { d = new Dev(); d.name = name.isEmpty() ? "جهاز مجهول" : name; devices.put(id, d); }
+                if (!name.isEmpty()) d.name = name;
+                d.host = d.host || host;
+                d.last = System.currentTimeMillis();
+                if (host) { seenHostId = id; seenHostName = d.name; }
+            }
+        }
+        return new Who(id, name.isEmpty() ? "جهاز مجهول" : name, host);
     }
 
     private File metaFile() {
@@ -69,8 +102,8 @@ public class LanServer {
         try (BufferedReader r = new BufferedReader(new InputStreamReader(new FileInputStream(metaFile()), StandardCharsets.UTF_8))) {
             String line;
             while ((line = r.readLine()) != null) {
-                String[] p = line.split("\t", 4);
-                if (p.length == 4) meta.put(p[0], new String[]{p[1], p[2], p[3]});
+                String[] p = line.split("\t", 6);
+                if (p.length >= 4) meta.put(p[0], new String[]{p[1], p[2], p[3], p.length > 4 ? p[4] : "", p.length > 5 ? p[5] : ""});
             }
         } catch (IOException ignored) { }
     }
@@ -80,7 +113,8 @@ public class LanServer {
             try (Writer w = new OutputStreamWriter(new FileOutputStream(metaFile()), StandardCharsets.UTF_8)) {
                 for (Map.Entry<String, String[]> e : meta.entrySet()) {
                     String[] v = e.getValue();
-                    w.write(clean(e.getKey()) + "\t" + clean(v[0]) + "\t" + clean(v[1]) + "\t" + v[2] + "\n");
+                    w.write(clean(e.getKey()) + "\t" + clean(v[0]) + "\t" + clean(v[1]) + "\t" + v[2]
+                            + "\t" + clean(v[3]) + "\t" + clean(v[4]) + "\n");
                 }
             } catch (IOException ignored) { }
         }
@@ -291,7 +325,7 @@ public class LanServer {
             int q = target.indexOf('?');
             if (q >= 0) { path = target.substring(0, q); query = target.substring(q + 1); }
             Map<String, String> qp = parseQuery(query);
-            Who who = whoOf(s, h);
+            Who who = whoOf(s, h, qp);
             if (method.equals("GET") || method.equals("HEAD")) doGet(out, path, qp, h, who);
             else if (method.equals("POST")) doPost(in, out, path, qp, h, who);
             else send(out, 400, "text/plain", "Bad request".getBytes());
@@ -310,16 +344,42 @@ public class LanServer {
             StringBuilder sb = new StringBuilder("[");
             for (int i = 0; i < list.size(); i++) {
                 File f = list.get(i);
-                if (i > 0) sb.append(',');
                 String[] m;
                 synchronized (meta) { m = meta.get(f.getName()); }
+                String to = m != null ? m[3] : "";
+                if (!visible(who, to, m != null ? m[0] : "")) continue;
+                if (sb.length() > 1) sb.append(',');
                 boolean mine = m != null && !who.id.isEmpty() && m[0].equals(who.id);
                 sb.append("{\"name\":").append(esc(f.getName())).append(",\"size\":").append(f.length())
                   .append(",\"mtime\":").append(f.lastModified() / 1000)
                   .append(",\"from\":").append(esc(m != null ? m[1] : "غير معروف"))
                   .append(",\"fromHost\":").append(m != null && "1".equals(m[2]))
                   .append(",\"mine\":").append(mine)
-                  .append(",\"canDelete\":").append(who.host || mine).append('}');
+                  .append(",\"canDelete\":").append(who.host || mine)
+                  .append(",\"to\":").append(esc(to))
+                  .append(",\"toName\":").append(esc(m != null ? m[4] : ""))
+                  .append(",\"forMe\":").append(!to.isEmpty() && to.equals(who.id)).append('}');
+            }
+            json(out, 200, sb.append(']').toString());
+            return;
+        }
+        if (path.equals("/api/devices")) {
+            long now = System.currentTimeMillis();
+            List<String[]> out2 = new ArrayList<>();
+            synchronized (devices) {
+                for (Map.Entry<String, Dev> e : devices.entrySet()) {
+                    Dev d = e.getValue();
+                    boolean isHost = e.getKey().equals(seenHostId) || e.getKey().equals(nativeHostId);
+                    if (now - d.last < 15000 || isHost)
+                        out2.add(new String[]{e.getKey(), d.name, isHost ? "1" : "0", e.getKey().equals(who.id) ? "1" : "0"});
+                }
+            }
+            Collections.sort(out2, (x, y) -> x[2].equals(y[2]) ? x[1].compareTo(y[1]) : y[2].compareTo(x[2]));
+            StringBuilder sb = new StringBuilder("[");
+            for (String[] d : out2) {
+                if (sb.length() > 1) sb.append(',');
+                sb.append("{\"id\":").append(esc(d[0])).append(",\"name\":").append(esc(d[1]))
+                  .append(",\"host\":").append("1".equals(d[2])).append(",\"me\":").append("1".equals(d[3])).append('}');
             }
             json(out, 200, sb.append(']').toString());
             return;
@@ -329,14 +389,17 @@ public class LanServer {
             synchronized (texts) {
                 for (int i = 0; i < texts.size(); i++) {
                     String[] t = texts.get(i);
-                    if (i > 0) sb.append(',');
+                    if (!visible(who, t[6], t[3])) continue;
+                    if (sb.length() > 1) sb.append(',');
                     boolean mine = !who.id.isEmpty() && t[3].equals(who.id);
                     sb.append("{\"id\":").append(t[0]).append(",\"text\":").append(esc(t[1]))
                       .append(",\"time\":").append(t[2])
                       .append(",\"from\":").append(esc(t[4]))
                       .append(",\"fromHost\":").append("1".equals(t[5]))
                       .append(",\"mine\":").append(mine)
-                      .append(",\"canDelete\":").append(who.host || mine).append('}');
+                      .append(",\"canDelete\":").append(who.host || mine)
+                      .append(",\"to\":").append(esc(t[6])).append(",\"toName\":").append(esc(t[7]))
+                      .append(",\"forMe\":").append(!t[6].isEmpty() && t[6].equals(who.id)).append('}');
                 }
             }
             json(out, 200, sb.append(']').toString());
@@ -350,16 +413,19 @@ public class LanServer {
             String raw;
             try { raw = URLDecoder.decode(path.substring(7).replace("+", "%2B"), "UTF-8"); }
             catch (Exception e) { send(out, 400, "text/plain", "bad".getBytes()); return; }
-            download(out, raw, qp.containsKey("dl"), h.get("range"));
+            download(out, raw, qp.containsKey("dl"), h.get("range"), who);
             return;
         }
         send(out, 404, "text/plain", "Not found".getBytes());
     }
 
-    private void download(OutputStream out, String raw, boolean dl, String range) throws IOException {
+    private void download(OutputStream out, String raw, boolean dl, String range, Who who) throws IOException {
         String name = safeName(raw);
         File f = name == null ? null : new File(root, name);
         if (f == null || !f.isFile()) { send(out, 404, "text/plain", "Not found".getBytes()); return; }
+        String[] mm;
+        synchronized (meta) { mm = meta.get(name); }
+        if (mm != null && !visible(who, mm[3], mm[0])) { send(out, 404, "text/plain", "Not found".getBytes()); return; }
         long size = f.length(), start = 0, end = size - 1;
         int status = 200;
         if (range != null) {
@@ -429,16 +495,21 @@ public class LanServer {
                 if (n > 200000) { json(out, 400, "{\"error\":\"too large\"}"); return; }
                 byte[] b = new byte[(int) n];
                 new DataInputStream(in).readFully(b);
-                String text = jsonString(new String(b, StandardCharsets.UTF_8), "text").trim();
+                String body = new String(b, StandardCharsets.UTF_8);
+                String text = jsonString(body, "text").trim();
+                String to = jsonString(body, "to").trim();
+                String toName = jsonString(body, "toName").trim();
+                if (to.length() > 64) to = to.substring(0, 64);
+                if (toName.length() > 40) toName = toName.substring(0, 40);
                 if (text.isEmpty()) { json(out, 400, "{\"error\":\"empty\"}"); return; }
                 if (text.length() > 100000) text = text.substring(0, 100000);
                 synchronized (texts) {
                     texts.add(0, new String[]{String.valueOf(System.currentTimeMillis()), text,
-                            String.valueOf(System.currentTimeMillis() / 1000), who.id, who.name, who.host ? "1" : "0"});
+                            String.valueOf(System.currentTimeMillis() / 1000), who.id, who.name, who.host ? "1" : "0", to, toName});
                     while (texts.size() > 30) texts.remove(texts.size() - 1);
                 }
                 Events ev = events;
-                if (ev != null && !who.host) ev.onText(text, who.name);
+                if (ev != null && !who.host && forHost(to)) ev.onText(text, who.name, to);
                 json(out, 200, "{\"ok\":true}");
                 return;
             }
@@ -491,10 +562,16 @@ public class LanServer {
             if (!ok) part.delete();
         }
         if (!part.renameTo(fin)) { part.delete(); json(out, 400, "{\"error\":\"rename failed\"}"); return; }
-        synchronized (meta) { meta.put(fin.getName(), new String[]{who.id, who.name, who.host ? "1" : "0"}); }
+        String to = h.containsKey("x-to") ? h.get("x-to") : "";
+        if (to.length() > 64) to = to.substring(0, 64);
+        String toName = "";
+        try { toName = URLDecoder.decode(h.containsKey("x-to-name") ? h.get("x-to-name").replace("+", "%2B") : "", "UTF-8"); }
+        catch (Exception ignored) { }
+        if (toName.length() > 40) toName = toName.substring(0, 40);
+        synchronized (meta) { meta.put(fin.getName(), new String[]{who.id, who.name, who.host ? "1" : "0", to, toName}); }
         saveMeta();
         Events ev = events;
-        if (ev != null && !who.host) ev.onFile(fin.getName(), who.name);
+        if (ev != null && !who.host && forHost(to)) ev.onFile(fin.getName(), who.name, to);
         json(out, 200, "{\"ok\":true,\"name\":" + esc(fin.getName()) + "}");
     }
 }
