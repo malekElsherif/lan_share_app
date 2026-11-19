@@ -45,12 +45,19 @@
   #qr{background:#fff;padding:10px;border-radius:8px;display:inline-block;margin-top:10px;line-height:0}
   #toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#232834;border:1px solid var(--line);padding:9px 16px;border-radius:20px;opacity:0;transition:.2s;pointer-events:none}
   #toast.on{opacity:1}
+  .tag{color:var(--acc)} .host{color:#f5c542}
+  #nameBox{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50}
+  #nameBox[hidden]{display:none}
+  #nameBox .box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;width:min(90vw,340px)}
+  #nameBox input{width:100%;background:#0b0d11;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:15px}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
     <h1>📂 LAN Drop</h1>
+    <button id="who" class="ic" title="اسم جهازك"></button>
+    <button id="bell" class="ic" hidden title="تفعيل إشعارات المتصفح">🔔</button>
     <span class="spacer"></span>
     <button class="primary" id="installBtn" hidden>📲 تثبيت كتطبيق</button>
     <span class="link" id="link" title="اضغط للنسخ">...</span>
@@ -94,6 +101,7 @@
   </div>
 </div>
 <div id="toast"></div>
+<div id="nameBox" hidden><div class="box"><h2>اسم جهازك</h2><input id="nameIn" maxlength="40" placeholder="مثلًا: تليفون مالك"><div style="margin-top:10px"><button class="primary" id="nameSave">حفظ</button></div><div class="hint" style="margin-top:8px">الاسم ده بيظهر للباقيين جنب كل ملف أو رسالة بتبعتها.</div></div></div>
 
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
 <script>
@@ -106,6 +114,49 @@ function copy(text){
   if(navigator.clipboard && window.isSecureContext){ return navigator.clipboard.writeText(text).then(()=>toast('اتنسخ ✓')); }
   const a=document.createElement('textarea'); a.value=text; a.style.position='fixed'; a.style.opacity='0'; document.body.appendChild(a); a.select();
   try{ document.execCommand('copy'); toast('اتنسخ ✓'); }catch(e){ toast('انسخه يدويًا'); } a.remove();
+}
+
+/* ---------- هوية الجهاز ---------- */
+const store = { get(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }, set(k,v){ try{ localStorage.setItem(k,v); }catch(e){} } };
+function rid(){ return (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36); }
+let DID = store.get('ld_id'); if(!DID){ DID = rid(); store.set('ld_id', DID); }
+function guessName(){
+  const ua = navigator.userAgent, m = ua.match(/Android [\d.]+; ([^;)]+)/);
+  if(m) return m[1].trim();
+  if(/iPhone/.test(ua)) return 'iPhone'; if(/iPad/.test(ua)) return 'iPad';
+  if(/Windows/.test(ua)) return 'Windows'; if(/Mac OS/.test(ua)) return 'Mac'; if(/Linux/.test(ua)) return 'Linux';
+  return 'جهاز';
+}
+let NAME = store.get('ld_name') || guessName();
+function hdrs(extra){ return Object.assign({'X-Device-Id': DID, 'X-Device-Name': encodeURIComponent(NAME)}, extra || {}); }
+function showName(){ $('#who').textContent = '👤 ' + NAME + ' ✎'; }
+showName();
+$('#who').onclick = () => { $('#nameIn').value = NAME; $('#nameBox').hidden = false; $('#nameIn').focus(); };
+$('#nameSave').onclick = () => { const v = $('#nameIn').value.trim(); if(v){ NAME = v.slice(0,40); store.set('ld_name', NAME); showName(); } $('#nameBox').hidden = true; };
+$('#nameBox').onclick = e => { if(e.target.id === 'nameBox') $('#nameBox').hidden = true; };
+if(!store.get('ld_name')) setTimeout(() => $('#who').click(), 300);
+
+/* ---------- إشعارات ---------- */
+const seen = new Set(); let primed = false, unread = 0;
+const baseTitle = document.title;
+function notifyNew(title, body){
+  unread++; if(document.hidden) document.title = '(' + unread + ') ' + baseTitle;
+  toast(title + ': ' + body);
+  try{ if(navigator.vibrate) navigator.vibrate(120); }catch(e){}
+  try{ if(window.Notification && Notification.permission === 'granted' && document.hidden) new Notification(title, {body}); }catch(e){}
+}
+document.addEventListener('visibilitychange', () => { if(!document.hidden){ unread = 0; document.title = baseTitle; } });
+if(window.Notification && Notification.permission === 'default'){
+  $('#bell').hidden = false;
+  $('#bell').onclick = async () => { await Notification.requestPermission(); $('#bell').hidden = true; };
+}
+function checkNew(items, kind){
+  for(const it of items){
+    const key = kind + ':' + (kind === 'f' ? it.name + '|' + it.mtime : it.id);
+    if(seen.has(key)) continue;
+    seen.add(key);
+    if(primed && !it.mine) notifyNew(kind === 'f' ? '📥 ملف جديد من ' + it.from : '💬 رسالة من ' + it.from, kind === 'f' ? it.name : it.text.slice(0,60));
+  }
 }
 
 /* ---------- رفع ---------- */
@@ -128,6 +179,7 @@ function next(){
   const {f, el} = job, small = el.querySelector('small'), bar = el.querySelector('.bar i');
   const x = new XMLHttpRequest();
   x.open('POST', '/api/upload?name=' + encodeURIComponent(f.name));
+  x.setRequestHeader('X-Device-Id', DID); x.setRequestHeader('X-Device-Name', encodeURIComponent(NAME));
   const t0 = Date.now();
   x.upload.onprogress = e => {
     if(!e.lengthComputable) return;
@@ -157,7 +209,8 @@ window.addEventListener('paste', e => { const fs=[...(e.clipboardData?.files||[]
 let lastFiles = '', lastTexts = '';
 async function refresh(){
   try{
-    const fs = await (await fetch('/api/files')).json();
+    const fs = await (await fetch('/api/files', {headers: hdrs()})).json();
+    checkNew(fs, 'f');
     const sig = JSON.stringify(fs);
     if(sig !== lastFiles){
       lastFiles = sig;
@@ -165,20 +218,22 @@ async function refresh(){
       $('#files').innerHTML = fs.length ? fs.map(f => `
         <div class="row">
           <div class="nm"><a href="/files/${encodeURIComponent(f.name)}" target="_blank">${esc(f.name)}</a>
-            <small>${fmt(f.size)} · ${ago(f.mtime)}</small></div>
+            <small>${fmt(f.size)} · ${ago(f.mtime)} · <span class="${f.fromHost?'host':'tag'}">${f.fromHost?'👑 ':''}${esc(f.from||'مجهول')}${f.mine?' (إنت)':''}</span></small></div>
           <a class="btn ic" href="/files/${encodeURIComponent(f.name)}?dl=1" title="تحميل">⬇</a>
-          <button class="ic" data-del="${esc(f.name)}" title="حذف">🗑</button>
+          ${f.canDelete ? `<button class="ic" data-del="${esc(f.name)}" title="حذف">🗑</button>` : ''}
         </div>`).join('') : '<div class="empty">مفيش ملفات لسه</div>';
     }
-    const ts = await (await fetch('/api/texts')).json();
+    const ts = await (await fetch('/api/texts', {headers: hdrs()})).json();
+    checkNew(ts, 't'); primed = true;
     const sig2 = JSON.stringify(ts);
     if(sig2 !== lastTexts){
       lastTexts = sig2;
       $('#texts').innerHTML = ts.map(t => `
         <div class="row">
-          <div class="txt">${esc(t.text)}</div>
+          <div style="flex:1;min-width:0"><div class="txt">${esc(t.text)}</div>
+            <small><span class="${t.fromHost?'host':'tag'}">${t.fromHost?'👑 ':''}${esc(t.from||'مجهول')}${t.mine?' (إنت)':''}</span> · ${ago(t.time)}</small></div>
           <button class="ic" data-copy="${t.id}" title="نسخ">📋</button>
-          <button class="ic" data-tdel="${t.id}" title="حذف">🗑</button>
+          ${t.canDelete ? `<button class="ic" data-tdel="${t.id}" title="حذف">🗑</button>` : ''}
         </div>`).join('');
       window._texts = ts;
     }
@@ -187,16 +242,18 @@ async function refresh(){
 $('#files').addEventListener('click', async e => {
   const b = e.target.closest('[data-del]'); if(!b) return;
   if(!confirm('حذف "' + b.dataset.del + '" ؟')) return;
-  await fetch('/api/delete?name=' + encodeURIComponent(b.dataset.del), {method:'POST'}); refresh();
+  const r = await fetch('/api/delete?name=' + encodeURIComponent(b.dataset.del), {method:'POST', headers: hdrs()});
+  if(!r.ok){ try{ toast((await r.json()).error); }catch(_){ toast('مش مسموحلك'); } }
+  refresh();
 });
 $('#texts').addEventListener('click', async e => {
   const c = e.target.closest('[data-copy]'), d = e.target.closest('[data-tdel]');
   if(c){ const t=(window._texts||[]).find(x=>String(x.id)===c.dataset.copy); if(t) copy(t.text); }
-  if(d){ await fetch('/api/text/delete?id=' + d.dataset.tdel, {method:'POST'}); refresh(); }
+  if(d){ const r = await fetch('/api/text/delete?id=' + d.dataset.tdel, {method:'POST', headers: hdrs()}); if(!r.ok){ try{ toast((await r.json()).error); }catch(_){ toast('مش مسموحلك'); } } refresh(); }
 });
 $('#sendTxt').onclick = async () => {
   const v = $('#txt').value.trim(); if(!v) return;
-  await fetch('/api/text', {method:'POST', body: JSON.stringify({text:v})});
+  await fetch('/api/text', {method:'POST', headers: hdrs(), body: JSON.stringify({text:v})});
   $('#txt').value=''; toast('اتشارك ✓'); refresh();
 };
 

@@ -237,11 +237,13 @@ public class P2PActivity extends Activity implements Link.Listener {
     }
 
     @Override
-    public void onReceived(final String fileName) {
+    public void onReceived(final String fileName, final String from) {
+        final String who = from == null ? "جهاز مجهول" : from;
+        Notifier.post(this, "📥 وصل ملف من " + who, fileName);
         runOnUiThread(() -> {
             progress.setText("");
-            log.setText("⬇ اتحفظ في Downloads/LanDrop: " + fileName + "\n" + log.getText());
-            Toast.makeText(this, "وصل: " + fileName, Toast.LENGTH_SHORT).show();
+            log.setText("⬇ " + fileName + "  (من " + who + ") اتحفظ في Downloads/LanDrop\n" + log.getText());
+            Toast.makeText(this, "وصل: " + fileName + " من " + who, Toast.LENGTH_SHORT).show();
         });
     }
 

@@ -181,7 +181,7 @@ final class BluetoothLink implements Link {
                 } finally {
                     o.finish(ok);
                 }
-                ui.onReceived(name);
+                ui.onReceived(name, peer);
             }
         } catch (IOException ignored) {
             // الاتصال اتقفل

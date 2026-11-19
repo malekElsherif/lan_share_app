@@ -79,6 +79,17 @@ public class ServerService extends Service {
             if (root == null) root = getFilesDir();
             root = new File(root, "LanDrop");
             server = new LanServer(root, PORT, readAsset("index.html"));
+            server.setEvents(new LanServer.Events() {
+                @Override
+                public void onFile(String name, String from) {
+                    Notifier.post(ServerService.this, "📥 ملف جديد من " + from, name);
+                }
+
+                @Override
+                public void onText(String text, String from) {
+                    Notifier.post(ServerService.this, "💬 رسالة من " + from, text.length() > 120 ? text.substring(0, 120) : text);
+                }
+            });
             server.start();
             responder = new Discovery.Responder();
             try {

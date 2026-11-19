@@ -19,13 +19,83 @@ public class LanServer {
         t.setDaemon(true);
         return t;
     });
-    private final List<String[]> texts = new ArrayList<>(); // {id, text, time}
+    private final List<String[]> texts = new ArrayList<>(); // {id, text, time, senderId, sender, hostFlag}
+    private final Map<String, String[]> meta = new HashMap<>(); // اسم الملف -> {senderId, sender, hostFlag}
+
+    /** إشعارات لما جهاز تاني يبعت ملف أو رسالة. */
+    public interface Events {
+        void onFile(String name, String from);
+        void onText(String text, String from);
+    }
+
+    private volatile Events events;
+
+    public void setEvents(Events e) {
+        events = e;
+    }
+
+    private static final class Who {
+        final String id, name;
+        final boolean host;
+
+        Who(String id, String name, boolean host) {
+            this.id = id;
+            this.name = name;
+            this.host = host;
+        }
+    }
+
+    private Who whoOf(Socket s, Map<String, String> h) {
+        String id = h.containsKey("x-device-id") ? h.get("x-device-id") : "";
+        if (id.length() > 64) id = id.substring(0, 64);
+        String name = "";
+        try {
+            name = URLDecoder.decode(h.containsKey("x-device-name") ? h.get("x-device-name").replace("+", "%2B") : "", "UTF-8");
+        } catch (Exception ignored) { }
+        name = name.replaceAll("[\\x00-\\x1f]", "").trim();
+        if (name.length() > 40) name = name.substring(0, 40);
+        if (name.isEmpty()) name = "جهاز مجهول";
+        InetAddress a = s.getInetAddress();
+        String ip = a.getHostAddress();
+        boolean host = ip.equals("127.0.0.1") || ip.equals("0:0:0:0:0:0:0:1") || a.equals(s.getLocalAddress());
+        return new Who(id, name, host);
+    }
+
+    private File metaFile() {
+        return new File(root, ".landrop-meta");
+    }
+
+    private void loadMeta() {
+        try (BufferedReader r = new BufferedReader(new InputStreamReader(new FileInputStream(metaFile()), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                String[] p = line.split("\t", 4);
+                if (p.length == 4) meta.put(p[0], new String[]{p[1], p[2], p[3]});
+            }
+        } catch (IOException ignored) { }
+    }
+
+    private void saveMeta() {
+        synchronized (meta) {
+            try (Writer w = new OutputStreamWriter(new FileOutputStream(metaFile()), StandardCharsets.UTF_8)) {
+                for (Map.Entry<String, String[]> e : meta.entrySet()) {
+                    String[] v = e.getValue();
+                    w.write(clean(e.getKey()) + "\t" + clean(v[0]) + "\t" + clean(v[1]) + "\t" + v[2] + "\n");
+                }
+            } catch (IOException ignored) { }
+        }
+    }
+
+    private static String clean(String t) {
+        return t.replaceAll("[\\t\\r\\n]", " ");
+    }
 
     public LanServer(File root, int port, byte[] page) {
         this.root = root;
         this.port = port;
         this.page = page;
         root.mkdirs();
+        loadMeta();
     }
 
     public void start() throws IOException {
@@ -171,6 +241,7 @@ public class LanServer {
             case 200: return "OK";
             case 206: return "Partial Content";
             case 400: return "Bad Request";
+            case 403: return "Forbidden";
             case 404: return "Not Found";
             case 411: return "Length Required";
             case 416: return "Range Not Satisfiable";
@@ -220,14 +291,15 @@ public class LanServer {
             int q = target.indexOf('?');
             if (q >= 0) { path = target.substring(0, q); query = target.substring(q + 1); }
             Map<String, String> qp = parseQuery(query);
-            if (method.equals("GET") || method.equals("HEAD")) doGet(out, path, qp, h);
-            else if (method.equals("POST")) doPost(in, out, path, qp, h);
+            Who who = whoOf(s, h);
+            if (method.equals("GET") || method.equals("HEAD")) doGet(out, path, qp, h, who);
+            else if (method.equals("POST")) doPost(in, out, path, qp, h, who);
             else send(out, 400, "text/plain", "Bad request".getBytes());
             out.flush();
         } catch (Exception ignored) { }
     }
 
-    private void doGet(OutputStream out, String path, Map<String, String> qp, Map<String, String> h) throws IOException {
+    private void doGet(OutputStream out, String path, Map<String, String> qp, Map<String, String> h, Who who) throws IOException {
         if (path.equals("/")) { send(out, 200, "text/html; charset=utf-8", page); return; }
         if (path.equals("/api/files")) {
             File[] fs = root.listFiles();
@@ -239,8 +311,15 @@ public class LanServer {
             for (int i = 0; i < list.size(); i++) {
                 File f = list.get(i);
                 if (i > 0) sb.append(',');
+                String[] m;
+                synchronized (meta) { m = meta.get(f.getName()); }
+                boolean mine = m != null && !who.id.isEmpty() && m[0].equals(who.id);
                 sb.append("{\"name\":").append(esc(f.getName())).append(",\"size\":").append(f.length())
-                  .append(",\"mtime\":").append(f.lastModified() / 1000).append('}');
+                  .append(",\"mtime\":").append(f.lastModified() / 1000)
+                  .append(",\"from\":").append(esc(m != null ? m[1] : "غير معروف"))
+                  .append(",\"fromHost\":").append(m != null && "1".equals(m[2]))
+                  .append(",\"mine\":").append(mine)
+                  .append(",\"canDelete\":").append(who.host || mine).append('}');
             }
             json(out, 200, sb.append(']').toString());
             return;
@@ -251,8 +330,13 @@ public class LanServer {
                 for (int i = 0; i < texts.size(); i++) {
                     String[] t = texts.get(i);
                     if (i > 0) sb.append(',');
+                    boolean mine = !who.id.isEmpty() && t[3].equals(who.id);
                     sb.append("{\"id\":").append(t[0]).append(",\"text\":").append(esc(t[1]))
-                      .append(",\"time\":").append(t[2]).append('}');
+                      .append(",\"time\":").append(t[2])
+                      .append(",\"from\":").append(esc(t[4]))
+                      .append(",\"fromHost\":").append("1".equals(t[5]))
+                      .append(",\"mine\":").append(mine)
+                      .append(",\"canDelete\":").append(who.host || mine).append('}');
                 }
             }
             json(out, 200, sb.append(']').toString());
@@ -319,14 +403,25 @@ public class LanServer {
     }
 
     private void doPost(InputStream in, OutputStream out, String path, Map<String, String> qp,
-                        Map<String, String> h) throws IOException {
+                        Map<String, String> h, Who who) throws IOException {
         try {
-            if (path.equals("/api/upload")) { upload(in, out, qp, h); return; }
+            if (path.equals("/api/upload")) { upload(in, out, qp, h, who); return; }
             if (path.equals("/api/delete")) {
                 String name = safeName(qp.get("name"));
                 File f = name == null ? null : new File(root, name);
-                if (f != null && f.isFile() && f.delete()) json(out, 200, "{\"ok\":true}");
-                else json(out, 404, "{\"error\":\"not found\"}");
+                if (f == null || !f.isFile()) { json(out, 404, "{\"error\":\"not found\"}"); return; }
+                String[] m;
+                synchronized (meta) { m = meta.get(name); }
+                boolean allowed = who.host || (m != null && !who.id.isEmpty() && m[0].equals(who.id));
+                if (!allowed) {
+                    json(out, 403, "{\"error\":" + esc("مش مسموحلك تحذف ده: بس صاحب السيرفر أو اللي رفعه") + "}");
+                    return;
+                }
+                if (f.delete()) {
+                    synchronized (meta) { meta.remove(name); }
+                    saveMeta();
+                    json(out, 200, "{\"ok\":true}");
+                } else json(out, 404, "{\"error\":\"not found\"}");
                 return;
             }
             if (path.equals("/api/text")) {
@@ -339,19 +434,27 @@ public class LanServer {
                 if (text.length() > 100000) text = text.substring(0, 100000);
                 synchronized (texts) {
                     texts.add(0, new String[]{String.valueOf(System.currentTimeMillis()), text,
-                            String.valueOf(System.currentTimeMillis() / 1000)});
+                            String.valueOf(System.currentTimeMillis() / 1000), who.id, who.name, who.host ? "1" : "0"});
                     while (texts.size() > 30) texts.remove(texts.size() - 1);
                 }
+                Events ev = events;
+                if (ev != null && !who.host) ev.onText(text, who.name);
                 json(out, 200, "{\"ok\":true}");
                 return;
             }
             if (path.equals("/api/text/delete")) {
                 String id = qp.getOrDefault("id", "0");
+                boolean denied = false;
                 synchronized (texts) {
-                    for (Iterator<String[]> it = texts.iterator(); it.hasNext(); )
-                        if (it.next()[0].equals(id)) it.remove();
+                    for (Iterator<String[]> it = texts.iterator(); it.hasNext(); ) {
+                        String[] t = it.next();
+                        if (!t[0].equals(id)) continue;
+                        if (who.host || (!who.id.isEmpty() && t[3].equals(who.id))) it.remove();
+                        else denied = true;
+                    }
                 }
-                json(out, 200, "{\"ok\":true}");
+                if (denied) json(out, 403, "{\"error\":" + esc("مش مسموحلك تحذف ده: بس صاحب السيرفر أو اللي بعته") + "}");
+                else json(out, 200, "{\"ok\":true}");
                 return;
             }
         } catch (Exception e) {
@@ -361,7 +464,7 @@ public class LanServer {
         send(out, 404, "text/plain", "Not found".getBytes());
     }
 
-    private void upload(InputStream in, OutputStream out, Map<String, String> qp, Map<String, String> h) throws IOException {
+    private void upload(InputStream in, OutputStream out, Map<String, String> qp, Map<String, String> h, Who who) throws IOException {
         String name = safeName(qp.get("name"));
         if (name == null) { json(out, 400, "{\"error\":\"bad name\"}"); return; }
         String cl = h.get("content-length");
@@ -388,6 +491,10 @@ public class LanServer {
             if (!ok) part.delete();
         }
         if (!part.renameTo(fin)) { part.delete(); json(out, 400, "{\"error\":\"rename failed\"}"); return; }
+        synchronized (meta) { meta.put(fin.getName(), new String[]{who.id, who.name, who.host ? "1" : "0"}); }
+        saveMeta();
+        Events ev = events;
+        if (ev != null && !who.host) ev.onFile(fin.getName(), who.name);
         json(out, 200, "{\"ok\":true,\"name\":" + esc(fin.getName()) + "}");
     }
 }

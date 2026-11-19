@@ -11,7 +11,7 @@ interface Link {
         void onConnected(String name);
         void onDisconnected(String name);
         void onProgress(String label, int percent);
-        void onReceived(String fileName);
+        void onReceived(String fileName, String from);
         void onConfirm(String name, Runnable accept, Runnable reject);
     }
 

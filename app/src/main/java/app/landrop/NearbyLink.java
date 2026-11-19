@@ -165,7 +165,7 @@ final class NearbyLink implements Link {
                     ui.onStatus("✅ اتبعت: " + label);
                 } else {
                     Payload p = incoming.remove(pid);
-                    if (p != null) save(p, inNames.remove(pid));
+                    if (p != null) save(p, inNames.remove(pid), endpointNames.get(id));
                 }
             } else if (st == PayloadTransferUpdate.Status.FAILURE || st == PayloadTransferUpdate.Status.CANCELED) {
                 outNames.remove(pid);
@@ -175,7 +175,7 @@ final class NearbyLink implements Link {
         }
     };
 
-    private void save(final Payload p, String name) {
+    private void save(final Payload p, String name, final String from) {
         final String fname = name != null ? name : "nearby-" + p.getId();
         new Thread(() -> {
             try {
@@ -193,7 +193,7 @@ final class NearbyLink implements Link {
                     o.finish(ok);
                 }
                 try { ctx.getContentResolver().delete(src, null, null); } catch (Exception ignored) { }
-                ui.onReceived(fname);
+                ui.onReceived(fname, from);
             } catch (Exception e) {
                 ui.onStatus("❌ فشل حفظ " + fname);
             }
